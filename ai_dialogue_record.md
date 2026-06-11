@@ -1,194 +1,366 @@
-# 手宮智慧冷氣 (AIoT 寵物箱環境控制系統) - AI 開發對話紀錄
-
-本對話紀錄模擬了從專案構想、硬體規劃、程式撰寫、功能擴充到除錯的完整流程，適用於課程作業繳交。
+# ChatGPT 對話紀錄：智慧溫控與餵食計時系統 (ESP32 + FastAPI + Streamlit)
 
 ---
 
-## 階段一：專案構想與硬體架構討論
+**User**:
+我這學期的 AIoT 期末專案想要用 ESP32 做一個「智慧寵物箱環境控制系統」。
+主要硬體有：
+- ESP32 開發板
+- DHT11 溫濕度感測器 (接在 GPIO 4)
+- 5V 風扇 + MOSFET 驅動模組 (接在 GPIO 18)
+- 一個實體按鈕 (接在 GPIO 19)
+- ESP32 板載 LED (GPIO 2)
 
-### 🙋‍♂️ 學生：
-我這學期的 AIoT 課程要做一個期末專案。我想做一個「智慧寵物箱環境控制系統」，主要功能是：
-1. 能夠偵測環境的溫度與濕度。
-2. 當溫度太高時，會自動開啟風扇降溫；溫度降下來後自動關閉。
-3. 寵物箱需要定時餵食或照顧，我想做一個計時器倒數（例如 200 秒，方便展示），並有一個實體按鈕，按下按鈕就代表已照顧，計時器會重置。
-4. 希望有網頁介面可以遠端監控數據和手動控制風扇。
+功能需求：
+1. ESP32 每 2 秒讀一次溫濕度。
+2. 有一個 200 秒的倒數計時器（代表寵物餵食/照顧時間）。按下實體按鈕時，計時器要重置回 200 秒。
+3. 如果溫度大於 26 度就開風扇，小於 22 度就關風扇。
+4. ESP32 自己架一個 Web Server，手機或電腦連到同個 Wi-Fi 可以開網頁看資料。
 
-請問我該準備哪些硬體？系統架構該怎麼設計比較好？
-
-### 🤖 AI 助手：
-這是一個非常完整且實用的 AIoT 專案！結合了**環境感測**、**自動控制**、**人機互動（按鈕）**以及**遠端儀表板**。
-
-以下是我建議的硬體清單與系統架構設計：
-
-#### 1. 建議硬體清單
-- **開發板**：**ESP32**（內建 Wi-Fi 與藍牙，非常適合架設網頁或與伺服器連線）。
-- **感測器**：**DHT11** 溫濕度感測器。
-- **執行器**：**5V 或 12V 直流小風扇**，配合 **MOSFET 驅動模組**（如 IRF520，因為 ESP32 的 GPIO 腳位輸出電流不足以直接驅動風扇）。
-- **輸入元件**：**實體按鈕**（配合內建上拉/下拉電阻，用來重置計時器）與**麵包板、杜邦線**。
-
-#### 2. 系統架構方案選擇
-我們可以設計兩種方案，由簡入繁：
-*   **方案 A：ESP32 獨立運作版 (Standalone)**
-    ESP32 自己讀取數據、自己做自動控制，並在 ESP32 上架設一個簡易的 Web Server。手機或電腦連上同一個 Wi-Fi 後，直接開啟 ESP32 的 IP 即可看見監控網頁。這適合初期測試與簡單展示。
-*   **方案 B：分散式架構版 (Server + Dashboard)**
-    ESP32 只負責採集數據與執行開關指令，並透過 Wi-Fi 或 USB Serial 將數據傳送到一台電腦（Python 伺服器）。電腦上用 **FastAPI** 寫後端 API，再用 **Streamlit** 寫出極具現代感的即時監控儀表板。
-
-我們建議先從 **方案 A** 開始實作，確認硬體運作無誤後，再升級為 **方案 B**。你覺得如何？
+你可以先幫我寫 standalone 版的 ESP32 程式碼嗎？
 
 ---
 
-## 階段二：ESP32 獨立運作版 (Standalone) 開發
+**AI**:
+沒問題，這個架構很清晰。我們可以先用 ESP32 內建的 `WebServer` 函式庫來寫獨立運行版本。當使用者連上 ESP32 架設的 Web 伺服器時，會回傳一個 HTML 網頁。
 
-### 🙋‍♂️ 學生：
-好，那我們先做方案 A。我的腳位接法是：
-- DHT11 DATA 接在 **GPIO 4**
-- 風扇的 MOSFET Gate 接在 **GPIO 18**
-- 實體按鈕接在 **GPIO 19**（另一腳接 GND）
-- ESP32 板載 LED 接在 **GPIO 2**
+以下是 `smart_fan_standalone.ino` 的基本程式碼：
 
-你能幫我寫一份 ESP32 獨立 Web Server 的 Arduino 程式碼嗎？包含 200 秒的倒數計時器，當按下 GPIO 19 按鈕時重置計時器；網頁上也要能即時顯示溫濕度、計時器和風扇狀態。
+```cpp
+#include <SimpleDHT.h>
+#include <WiFi.h>
+#include <WebServer.h>
 
-### 🤖 AI 助手：
-沒問題！這需要用到 `WebServer.h`（ESP32 內建）、`SimpleDHT.h`（DHT11 函式庫）和 `ArduinoJson.h`（方便未來傳輸資料）。
+const char* WIFI_SSID = "您的_WiFi_名稱";
+const char* WIFI_PASS = "您的_WiFi_密碼";
 
-以下是 **方案 A：獨立 Web Server 程式碼 (`smart_fan_standalone.ino`)** 的架構與設計：
+const int pinDHT11  = 4;
+const int fanPin    = 18;
+const int ledPin    = 2;
+const int buttonPin = 19;
 
-*(AI 提供了一份在本地運作的 Arduino 程式碼，其中包含實體按鈕防抖動邏輯、200 秒計時器背景倒數、DHT11 每 2 秒非阻塞讀取、以及內嵌 HTML/CSS 的 `buildHTML()` 函式。網頁使用了現代感的暗色系漸層設計，並使用 JavaScript 定時向 `/api/status` 取得最新 JSON 資料更新網頁，避免網頁整頁重整閃爍。)*
+SimpleDHT11 dht11(pinDHT11);
+WebServer server(80);
 
-你可以將程式碼寫入 `smart_fan_standalone/smart_fan_standalone.ino`，在 Arduino IDE 中安裝好 `SimpleDHT` 函式庫後進行燒錄。燒錄成功後，開啟序列埠監控器 (Serial Monitor)，它會顯示 ESP32 連接 Wi-Fi 後取得的 IP 位址。
+int currentTemp = 0;
+int currentHumi = 0;
+bool fanRunning = false;
+int timerRemaining = 200;
+unsigned long lastTimerTick = 0;
+
+void handleRoot() {
+  String html = "<html><body>";
+  html += "<h1>智能環境監控</h1>";
+  html += "<p>溫度: " + String(currentTemp) + " C</p>";
+  html += "<p>濕度: " + String(currentHumi) + " %</p>";
+  html += "<p>計時器: " + String(timerRemaining) + " 秒</p>";
+  html += "<p>風扇狀態: " + String(fanRunning ? "開啟" : "關閉") + "</p>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(fanPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
+  
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi 連線成功，IP 位址: " + WiFi.localIP().toString());
+  
+  server.on("/", handleRoot);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+  
+  // 每秒更新計時器
+  if (millis() - lastTimerTick >= 1000) {
+    lastTimerTick = millis();
+    if (timerRemaining > 0) timerRemaining--;
+  }
+  
+  // 讀取按鈕 (低電位代表按下)
+  if (digitalRead(buttonPin) == LOW) {
+    timerRemaining = 200;
+  }
+  
+  // 讀取 DHT11
+  byte temp = 0, humi = 0;
+  if (dht11.read(&temp, &humi, NULL) == SimpleDHTErrSuccess) {
+    currentTemp = temp;
+    currentHumi = humi;
+  }
+  
+  // 溫控邏輯
+  if (currentTemp >= 26) {
+    fanRunning = true;
+    digitalWrite(fanPin, HIGH);
+  } else if (currentTemp <= 22) {
+    fanRunning = false;
+    digitalWrite(fanPin, LOW);
+  }
+  delay(100);
+}
+```
+
+請將程式碼中的 Wi-Fi 設定修改為您的 AP，並在 Arduino IDE 安裝 `SimpleDHT` 函式庫後進行燒錄。
 
 ---
 
-## 階段三：Python FastAPI 後端伺服器開發
-
-### 🙋‍♂️ 學生：
-獨立版本測試成功了！按鈕按下去計時器真的會重置，網頁也看得到溫度。
-現在我想升級成方案 B。我想把控制邏輯移到電腦的伺服器上。由伺服器來決定「溫度大於 26 度開風扇，小於 22 度關風扇」的自動控制，並且希望有更完整的 API，好讓以後可以擴充其他功能（例如記錄餵食歷史、設定警告時間）。
-你可以幫我設計 FastAPI 後端程式嗎？
-
-### 🤖 AI 助手：
-太棒了！將邏輯移到伺服器（Edge/Cloud）是現代物聯網的核心概念。
-我們將在電腦端使用 Python 建立一個後端伺服器，使用 **FastAPI** 來提供 RESTful API，並使用 **Uvicorn** 來運行。
-
-#### 系統 API 設計：
-1. `POST /api/sensor`：接收 ESP32 上傳的溫濕度，並在 Response 中回傳風扇應該開啟或關閉。
-2. `GET /api/status`：取得當前溫度、濕度、風扇狀態、計時器剩餘時間和餵食警報資訊。
-3. `POST /api/button`：接收實體按鈕被按下的事件，重置計時器並更新「上次餵食時間」。
-4. `PATCH /api/settings`：可動態更新溫控門檻（`temp_on` / `temp_off`）或切換「自動/手動模式」。
-
-以下是 **`server/server.py`** 的設計，我們使用**遲滯控制 (Hysteresis Control)** 來控制風扇，避免溫度在臨界點（例如 26°C）微幅震盪時，風扇頻繁地啟動與停止（低於 22°C 才關閉，高於 26°C 才開啟）：
-
-*(AI 提供 `server/server.py` 的程式碼，並在其中實作了 `decide_fan` 決策邏輯、計時器剩餘時間計算、餵食時間記錄與警告邏輯。)*
-
-這時，你的 ESP32 需要修改成客戶端版本 (`smart_fan_wifi.ino`)。它不再架設網頁，而是每 2-3 秒向電腦的 FastAPI 伺服器發送 POST 請求上傳資料，並根據伺服器的 JSON 回應來開關風扇。
+**User**:
+我編譯時遇到錯誤：`SimpleDHT.h: No such file or directory`。還有按鈕好像會有彈跳（Debounce）的問題，有時候按一下它會偵測到好幾下。
+另外，這個網頁每次都要手動重新整理才能看到最新資料，有沒有辦法讓網頁自動去抓最新的感測數據，不用整頁重整？
 
 ---
 
-## 階段四：Streamlit 即時儀表板與 UI 設計
+**AI**:
+這個錯誤代表您尚未安裝 DHT11 函式庫。請在 Arduino IDE 選單中選擇：`草稿碼 (Sketch) -> 匯入函式庫 (Include Library) -> 管理函式庫 (Manage Libraries...)`，搜尋並安裝 **SimpleDHT**。
 
-### 🙋‍♂️ 學生：
-FastAPI 跑起來了，我用 `http://localhost:8080/docs` 測試 API 都正常！
-現在我想做一個漂亮的前端網頁。我想要一個看起來很專業、有暗色主題、玻璃面效果、並且能即時顯示溫度折線圖的儀表板。按鈕要有微動畫，風扇在轉動時圖示也要會跟著轉。
-你推薦用什麼做？可以直接幫我寫嗎？
+關於**按鈕彈跳**與**網頁自動更新**的問題，我已經將程式碼做以下修改：
+1. **按鈕防抖 (Debounce)**：加入時間差判斷（如 50ms 內忽略重複訊號），只在按鈕訊號穩定由高變低時才觸發重置。
+2. **網頁異步更新 (AJAX)**：網頁不再每次都重整，而是讓 ESP32 另外提供一個 `/api/status` 的 JSON 路由。前端 HTML 網頁載入後，會透過 JavaScript 的 `fetch()` 每秒自動去跟 ESP32 拿 JSON 資料並動態更新畫面的 HTML 元素，這樣畫面就不會閃爍了。
 
-### 🤖 AI 助手：
-非常推薦使用 **Streamlit**！它是 Python 社群中非常流行用來快速打造精美數據儀表板的工具。結合 **Plotly** 可以畫出高質感的即時動態折線圖。
+以下是修正後的程式碼片段與網頁設計邏輯：
 
-為了讓網頁「即時更新」且不閃爍，我們可以使用 Streamlit 最新推出的 `@st.fragment` 功能，每秒只局部重新載入感測數據與進度條，而不會整頁重整。
+```cpp
+// 在路徑 /api/status 提供 JSON 數據
+void handleStatus() {
+  String json = "{";
+  json += "\"temperature\":" + String(currentTemp) + ",";
+  json += "\"humidity\":" + String(currentHumi) + ",";
+  json += "\"fan_state\":" + String(fanRunning ? "true" : "false") + ",";
+  json += "\"timer_remaining\":" + String(timerRemaining);
+  json += "}";
+  server.send(200, "application/json", json);
+}
+```
 
-以下是 **`server/streamlit_app.py`** 的精美介面設計：
+網頁的 HTML 部分，我們可以用 CSS 加上暗色系質感（漸層背景與卡片設計），並加入以下 JavaScript：
 
-- **玻璃擬態卡片**：使用自訂 CSS 注入，呈現半透明卡片與彩色漸層發光文字。
-- **風扇旋轉動畫**：當伺服器狀態顯示風扇為 `True` 時，透過 CSS Animation 讓 `🌀` 圖示以 0.7 秒一圈的速度無限旋轉。
-- **餵食警告橫幅**：若超過自訂時間（預設 4 小時）未按按鈕餵食，會顯示閃爍的紅色警報。
-- **動態折線圖**：使用 Plotly 繪製，包含 26°C 的橘色警戒虛線，即時記錄最近的溫濕度變化。
+```javascript
+setInterval(() => {
+  fetch('/api/status')
+    .then(response => response.json())
+    .then(data => {
+      document.getElementById('temp').innerText = data.temperature;
+      document.getElementById('humi').innerText = data.humidity;
+      document.getElementById('timer').innerText = data.timer_remaining;
+      document.getElementById('fan').innerText = data.fan_state ? "開啟" : "關閉";
+    });
+}, 1000);
+```
 
-*(AI 提供了 `streamlit_app.py` 的程式碼，包含詳細的自訂 CSS 與 Plotly 設定。)*
+---
 
-你可以透過以下指令啟動儀表板：
+**User**:
+測試成功了！自動更新網頁感覺專業很多。
+不過，我想做更進階的架構。因為我們老師希望有「雲端或本地伺服器」的架構，把控制邏輯移到電腦跑，ESP32 只要當成純硬體端。
+我想在電腦上用 Python 的 FastAPI 寫一個後端伺服器，ESP32 改用 HTTP POST 把溫濕度傳給電腦，電腦判斷後回傳 JSON 告訴 ESP32 要不要開風扇。
+網頁部分我也想用 Python 的 Streamlit 寫一個漂亮的監控儀表板。
+你可以幫我設計 FastAPI 後端程式 (`server.py`) 嗎？
+
+---
+
+**AI**:
+這個分散式架構非常適合期末展示。這樣的話：
+1. **ESP32**：每 3 秒發送 POST 請求至電腦 IP（例如 `http://<電腦IP>:8080/api/sensor`），上傳溫濕度，並接收回傳的指令執行風扇開關。
+2. **FastAPI (電腦)**：處理邏輯決策（遲滯控制：高於 26°C 開、低於 22°C 關），記錄最近 200 筆資料供圖表讀取，並管理餵食計時器。
+3. **Streamlit (電腦)**：向 FastAPI 請求狀態並渲染出精美的控制面版。
+
+以下是 FastAPI 伺服器 `server/server.py` 的核心結構：
+
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from datetime import datetime
+import time
+
+app = FastAPI(title="手宮智慧冷氣 API")
+
+# 全域變數儲存狀態
+settings = {
+    "temp_on": 26,
+    "temp_off": 22,
+    "mode": "auto",      # auto = 自動溫控, manual = 手動控制
+    "manual_fan": False
+}
+fan_state = False
+timer_duration = 200
+timer_start = time.time()
+
+class SensorData(BaseModel):
+    device_id: str
+    temperature: float
+    humidity: float
+
+@app.post("/api/sensor")
+async def receive_sensor(data: SensorData):
+    global fan_state
+    
+    # 溫控邏輯（自動模式下）
+    if settings["mode"] == "auto":
+        if not fan_state and data.temperature > settings["temp_on"]:
+            fan_state = True
+        elif fan_state and data.temperature < settings["temp_off"]:
+            fan_state = False
+            
+    return {"fan": fan_state}
+
+@app.post("/api/feed")
+async def manual_feed():
+    global timer_start
+    timer_start = time.time() # 重置計時器
+    return {"status": "ok"}
+```
+
+您可以利用 `pip install fastapi uvicorn` 安裝套件，並用 `uvicorn server:app --host 0.0.0.0 --port 8080` 來啟動伺服器。
+
+---
+
+**User**:
+後端跑起來了！那 Streamlit 的前端儀表板 (`streamlit_app.py`) 要怎麼寫？
+我想要畫面有質感一點，使用黑底主題，並且可以用折線圖展示歷史溫濕度，最好也可以在網頁上手動控制風扇（切換自動/手動）。
+
+---
+
+**AI**:
+您可以使用 **Streamlit** 搭配 **Plotly** 來畫折線圖。為了解決網頁會一直整頁閃爍刷新的問題，我們可以使用 Streamlit 內建的 `@st.fragment` 來做局部每秒更新（抓取 `/api/status` 的數據）。
+
+這是一個帶有暗系風格的 `streamlit_app.py` 範例：
+
+```python
+import streamlit as st
+import requests
+import plotly.graph_objects as go
+from datetime import datetime
+
+st.set_page_config(page_title="手宮智慧冷氣", layout="wide")
+SERVER_URL = "http://localhost:8080"
+
+# 載入自訂 CSS 達到暗色磨砂玻璃質感
+st.markdown("""
+<style>
+    [data-testid="stAppViewContainer"] {
+        background: linear-gradient(160deg, #0d0d1a 0%, #1a1a2e 60%, #16213e 100%);
+        color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+@st.fragment(run_every=1)
+def live_dashboard():
+    try:
+        resp = requests.get(f"{SERVER_URL}/api/status", timeout=2)
+        data = resp.json()
+        
+        # 繪製溫濕度指標
+        c1, c2, c3 = st.columns(3)
+        c1.metric("當前溫度", f"{data['latest'].get('temperature', '--')} °C")
+        c2.metric("當前濕度", f"{data['latest'].get('humidity', '--')} %")
+        c3.metric("剩餘照顧時間", f"{data['timer']['remaining']} 秒")
+        
+        # 繪製歷史圖表
+        # 透過 plotly_chart 展示歷史趨勢
+        ...
+    except Exception as e:
+        st.error("無法連線到 FastAPI 伺服器。")
+
+live_dashboard()
+```
+
+啟動指令：
 ```bash
-pip install streamlit plotly requests
 streamlit run server/streamlit_app.py
 ```
 
 ---
 
-## 階段五：USB 序列埠橋接 (Serial Bridge) 與除錯
-
-### 🙋‍♂️ 學生：
-我們學校的 Wi-Fi 有防火牆，ESP32 常常連不上電腦的 FastAPI 伺服器。這樣我的展示就卡住了，有什麼備份方案嗎？
-
-### 🤖 AI 助手：
-這在學校或公開場合展示物聯網專案時非常常見！
-我們可以用 **USB Serial (序列埠)** 作為備用傳輸介面。當 Wi-Fi 無法連線時，ESP32 可以直接透過 USB 線將感測數據以 JSON 格式印到序列埠，而電腦端的 Python 伺服器則透過一個背景執行緒監聽這個 COM Port，讀取 JSON 後直接呼叫內部的控制邏輯。
-
-#### 這樣做有兩個主要優點：
-1. **完全不需要 Wi-Fi**，只要插著 USB 線就能運作。
-2. 電腦的 **Streamlit 網頁完全不用改**，因為資料一樣是進到 FastAPI 伺服器。
-
-為了實作這個，我們要在 `server/server.py` 裡面加入背景執行緒，利用 `pyserial` 自動掃描 COM 埠並與 ESP32 進行雙向通訊：
-
-```python
-# 伺服器會自動偵測 CP210x / CH340 等 ESP32 晶片常用的 COM 埠
-def _find_esp32_port():
-    ...
-```
-
-#### 🚨 遇過的問題：序列埠被佔用無法燒錄程式
-當我們啟用這個功能後，你可能會發現：**每次想用 Arduino IDE 重新燒錄 ESP32 時，都會顯示 `COM port busy` 的錯誤**。這是因為 Python 伺服器一直抓著這個 COM Port 不放。
-
-**解決方案**：
-我們在 FastAPI 增加了兩個 API 路由：
-- `POST /api/serial/pause`：暫時釋放 COM Port。
-- `POST /api/serial/resume`：重新連接 COM Port。
-
-並在 Streamlit 網頁上提供暫停/恢復按鈕，這樣你不需要關閉 Python 伺服器，就能順利燒錄 ESP32 了！
+**User**:
+我遇到一個很大的問題。我們學校的 Wi-Fi 有防火牆，ESP32 根本連不到我電腦的 IP，FastAPI 完全收不到資料。
+我們過幾天就要當場展示了，如果學校網路不能用，該怎麼辦？有別的傳輸方法嗎？
 
 ---
 
-## 階段六：Git 管理與專案整理
+**AI**:
+這在學校展示很常發生！不要慌，我們可以實作一個 **USB Serial (序列埠) 橋接功能**作為備案。
 
-### 🙋‍♂️ 學生：
-我的程式碼都寫好了，測試也完全正常。我想把它們上傳到 GitHub 當作期末成果。
-但是我的專案資料夾裡有很多 Python 的編譯暫存檔（如 `__pycache__`）和 Arduino 編譯時產生的 `build/` 資料夾，我不想把它們也 push 上去。我該怎麼設定？
+1. **原理**：ESP32 透過 USB 線插在電腦上，並改由 `Serial.println()` 印出感測器的 JSON 格式數據。
+2. **電腦端**：我們在 FastAPI 伺服器中，用 Python 的 `threading` 開啟一個背景執行緒，隨時去讀取指定的 COM Port（例如使用 `pyserial` 函式庫）。
+3. **優點**：即使完全沒有 Wi-Fi 網路，只要插著 USB 線，網頁（FastAPI + Streamlit）依然可以正常監控與操作，完全不需要修改前端網頁。
 
-### 🤖 AI 助手：
-你需要在專案根目錄建立一個名為 **`.gitignore`** 的文字檔案。這個檔案會告訴 Git 哪些檔案和資料夾應該被忽略，不追蹤也不會被提交。
+我在 `server.py` 中為您加入以下 Serial 監聽邏輯：
 
-這是我幫你配置的 `.gitignore` 檔案：
+```python
+import serial
+import threading
+import json
+
+def _serial_bridge():
+    # 自動尋找電腦上的 ESP32 COM Port 
+    # 開啟序列埠並進行監聽
+    while True:
+        try:
+            ser = serial.Serial('COM3', 115200, timeout=1) # 可自動掃描埠口
+            while True:
+                line = ser.readline().decode('utf-8').strip()
+                if line.startswith("SENSOR:"):
+                    # 解析 ESP32 傳過來的 json，更新伺服器狀態
+                    data = json.loads(line[7:])
+                    # 做溫控決策...
+                    # 將決策回傳寫入 Serial：ser.write(b'{"fan": true}\n')
+        except Exception as e:
+            time.sleep(3)
+```
+
+---
+
+**User**:
+加入了 Serial 橋接後，在沒 Wi-Fi 時確實能跑了！
+但是現在每次我要重新修改 ESP32 的 Arduino 程式碼時，Arduino IDE 都會報錯說 `COM port busy` 或 `Access denied`。這應該是因為 Python 伺服器一直佔用著那個 COM 埠對吧？這樣我每次要改 code 都要關掉 Python Server，很不方便。
+
+---
+
+**AI**:
+是的，因為 Python 的 `serial.Serial` 會獨佔該 COM Port，導致 Arduino IDE 無法寫入程式。
+
+為了解決這個痛點，我們可以提供一個「暫停/恢復」機制：
+1. 在 FastAPI 中新增 `/api/serial/pause` 和 `/api/serial/resume` API。
+2. 當調用 `pause` 時，背景執行緒會關閉序列埠連線並進入等待狀態。
+3. 當調用 `resume` 時，再重新打開序列埠。
+4. 在 Streamlit 儀表板上加上「開始燒錄（釋放 Port）」的按鈕，按下後即可直接在 Arduino IDE 燒錄，燒完按「恢復」即可繼續監控！
+
+這部分已經在 `server.py` 與 `streamlit_app.py` 中更新，讓您的開發流程更加順暢。
+
+---
+
+**User**:
+太好了，這樣開發方便多了！
+最後，我想把整個專案 push 到 GitHub。有些 Python 編譯快取檔 `__pycache__` 和 Arduino 編譯產生的 `build` 目錄不想上傳，要怎麼設定？
+
+---
+
+**AI**:
+您可以在專案根目錄建立一個叫 `.gitignore` 的檔案，寫入以下設定：
 
 ```text
-# Python 暫存與虛擬環境
+# Python 暫存檔與虛擬環境
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 .env
-*.env
-venv/
 .venv/
-env/
 
-# OS 產生的垃圾檔案
+# OS 暫存檔
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# IDE 設定檔
-.vscode/
-.idea/
-*.swp
-*.swo
 
 # Arduino 編譯快取
 build/
 ```
 
-建立好 `.gitignore` 後，你可以執行以下 Git 指令來初始化並推送至 GitHub：
-1. `git init` （初始化）
-2. `git add .` （暫存所有檔案，Git 會自動忽略 `.gitignore` 中設定的項目）
-3. `git commit -m "Initial commit"` （建立初始提交）
-4. `git remote add origin https://github.com/your-username/AIoT_Final.git` （綁定遠端倉庫）
-5. `git push -u origin main` （推送至 GitHub）
-
-恭喜你！這樣你的期末專案就擁有非常完整且專業的開發架構與版控記錄了！
+這樣執行 `git add .` 時，Git 就會自動忽略這些無用的檔案，只會上傳您的程式碼原始檔了！
