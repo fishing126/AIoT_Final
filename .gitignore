@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.env
+*.env
+venv/
+.venv/
+env/
+
+# 敏感設定（WiFi 密碼等）
+# 若要排除含密碼的 .ino，可在此加入
+
+# OS 產生的檔案
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / 編輯器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Arduino 編譯快取
+build/
